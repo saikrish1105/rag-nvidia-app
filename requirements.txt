@@ -1,0 +1,18 @@
+langchain-core
+langchain_openai
+langchain-community
+langchain-text-splitters
+langchain_experimental
+langchain-pymupdf4llm
+pytesseract
+pymongo
+faiss-cpu  # Use faiss-gpu if you have CUDA
+chromadb
+mongosh
+langchain_chroma
+sentence-transformers
+python-dotenv
+langchain-nvidia-ai-endpoints
+pypdf  # For PDF document loading
+tqdm  # Optional for progress bars
+streamlit
