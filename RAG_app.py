@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
 import img2pdf
+import time
 
 load_dotenv()
 
