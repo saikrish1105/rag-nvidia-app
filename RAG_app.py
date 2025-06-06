@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableParallel, RunnablePassthrough, Runn
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from pymongo import MongoClient
-from datetime import datetime
+from datetime import datetime,timezone
 import os
 from dotenv import load_dotenv
 from io import BytesIO
@@ -92,7 +92,7 @@ class MongoLogger:
         
     def log(self, query, context, answer):
         record = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": "timestamp": datetime.now(timezone.utc), # datetime.utcnow(), fixed depcriciation warning
             "query": query,
             "context": context,
             "answer": answer,
@@ -105,6 +105,9 @@ class MongoLogger:
 def format_docs(retrieved_docs):
   context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
   return context_text
+
+# Start timer
+start_time = time.time()
 
 # Enter the path to your file
 documents_loaded = load_chunk_documents(r"Documents\1-Definition and Macroeconomic Issues-16-07-2024.pdf")
@@ -158,7 +161,12 @@ context = format_docs(retriever.invoke(question))
 #Log the query answer and context to MongoDB
 logger.log(question,context,answer)
 
+# End timer and calculate execution time
+end_time = time.time()
+execution_time = end_time - start_time
+
 print(f"Question: {question}")
 print(f"Answer: {answer}")
 print(f"\nRetrieved Context:\n{context[:200]}...")
+print(f"\nExecution Time: {execution_time:.2f} seconds")
 
