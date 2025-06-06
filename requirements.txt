@@ -16,3 +16,5 @@ langchain-nvidia-ai-endpoints
 pypdf  # For PDF document loading
 tqdm  # Optional for progress bars
 streamlit
+img2pdf
+rapidocr_onnxruntime
