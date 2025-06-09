@@ -8,13 +8,13 @@ from langchain_core.runnables import RunnableParallel, RunnablePassthrough, Runn
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from pymongo import MongoClient
-from datetime import datetime,timezone
+from datetime import datetime, timezone
+import time 
 import os
 from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
 import img2pdf
-import time
 
 load_dotenv()
 
@@ -65,7 +65,7 @@ def VectorDB(docs):
     vector_store = Chroma.from_documents(
         documents=docs,
         embedding = embeddings,
-        persist_directory='chroma_db3',
+        persist_directory='vector_db/chroma_db',
         collection_name='nvidia_embeddings'
     )
     return vector_store
@@ -73,13 +73,14 @@ def VectorDB(docs):
 # create a MongoDB logger class to store your query answer and context
 class MongoLogger:
     def __init__(self):
-        # self.client = MongoClient(
-        #     "mongodb://admin:password@localhost:27017/",  # Added credentials
-        #     authSource="admin",  # Specify auth database
-        #     authMechanism="SCRAM-SHA-256",  # Explicit authentication method
-        #     serverSelectionTimeoutMS=5000
-        # )
-        self.client = MongoClient("mongodb://localhost:27017/") 
+        self.client = MongoClient(
+            "mongodb://localhost:27018/",
+            serverSelectionTimeoutMS=5000,
+            socketTimeoutMS=30000,
+            connectTimeoutMS=10000,  # Add explicit connect timeout
+            tlsAllowInvalidCertificates=True  # Bypass SSL validation if needed
+        )
+        # self.client = MongoClient("mongodb://localhost:27018/")   
         try:
             # Verify connection works
             self.client.admin.command('ping')
@@ -93,7 +94,7 @@ class MongoLogger:
         
     def log(self, query, context, answer):
         record = {
-            "timestamp": "timestamp": datetime.now(timezone.utc), # datetime.utcnow(), fixed depcriciation warning
+            "timestamp": datetime.now(timezone.utc),
             "query": query,
             "context": context,
             "answer": answer,
@@ -107,11 +108,8 @@ def format_docs(retrieved_docs):
   context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
   return context_text
 
-# Start timer
-start_time = time.time()
-
 # Enter the path to your file
-documents_loaded = load_chunk_documents(r"Documents\1-Definition and Macroeconomic Issues-16-07-2024.pdf")
+documents_loaded = load_chunk_documents(r"/home/sneha-ltim/saiKrish/RAG/Documents/pdf-test2.pdf")
 
 #creating a vector and storing it in a Vector Database
 vector_store = VectorDB(documents_loaded)
@@ -154,20 +152,35 @@ parallel_chain = RunnableParallel({
 parser = StrOutputParser()
 final_chain = parallel_chain | prompt | llm | parser
 
-# enter your query 
-question = "Explain me the core idea in 1 line"
-answer = final_chain.invoke(question)
-context = format_docs(retriever.invoke(question))
+print("\n===== Interactive RAG Chat =====")
+print("Type 'exit' or 'quit' to end the conversation")
 
-#Log the query answer and context to MongoDB
-logger.log(question,context,answer)
+while True:
+    # enter your query 
+    question = input("\nYou: ")
 
-# End timer and calculate execution time
-end_time = time.time()
-execution_time = end_time - start_time
+    if question.lower() in ["exit", "quit"]:
+        print("Ending conversation...")
+        break
 
-print(f"Question: {question}")
-print(f"Answer: {answer}")
-print(f"\nRetrieved Context:\n{context[:200]}...")
-print(f"\nExecution Time: {execution_time:.2f} seconds")
+    # Start timer to see how long the query takes to execute
+    start_time = time.time()
+
+    answer = final_chain.invoke(question)
+    context = format_docs(retriever.invoke(question))
+
+    # End timer and calculate execution time
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    # print(f"Question: {question}") NO need to print question again
+    print(f"Assistant: {answer}")
+    print(f"\nRetrieved Context:\n{context[:200]}...")
+    print(f"\nExecution Time: {execution_time:.2f} seconds")
+
+    #Log the query answer and context to MongoDB
+    print("Logging query, context, and answer to MongoDB...")
+    logger.log(question,context,answer)
+    print("Logged successfully!")
+    print("\n========================================\n")
 
