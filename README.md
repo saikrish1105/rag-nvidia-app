@@ -1,19 +1,13 @@
 # NVIDIA LangChain RAG App
 
-This project is a Retrieval-Augmented Generation (RAG) application using:
-- LangChain
-- NVIDIA's Mixtral-8x7B model
-- MongoDB logging
-- Chroma vector database
-- OCR/image-to-text PDF conversion
+A Streamlit-based Retrieval-Augmented Generation (RAG) application powered by NVIDIA Mixtral-8x7B and LangChain.
 
-## 💾 Features
-- Drag & drop document support (PDF or images)
-- Converts image to PDF if needed
-- Extracts and chunks text
-- Stores vectors using NVIDIA embeddings + Chroma
-- Logs query, context, and answer to MongoDB
-- LLM answers based strictly on context
+## Features
+- 📄 Document upload (PDF/images)
+- 🖼️ OCR & image-to-text conversion
+- 🔍 Semantic search with ChromaDB
+- 📊 MongoDB logging
+- 💬 Context-aware LLM responses
 
 ## 🔧 Setup
 
@@ -25,23 +19,28 @@ This project is a Retrieval-Augmented Generation (RAG) application using:
 2. **Set up your `.env` file**:
     ```bash
     cp .env.example .env
+    # Add your NVIDIA_API_KEY to .env
     ```
 
-3. **Start MongoDB (Docker example)**:
+3. **Create MongoDB container (one-time)**:
     ```bash
     docker run -d --name rag-mongo -p 27018:27017 mongo
     ```
 
-4. **Run the app**:
+4. **Start MongoDB container (after creation)**:
     ```bash
-    python main.py
+    docker start rag-mongo
+    ```
+
+5. **Run the app**:
+    ```bash
+    streamlit run app.py
     ```
 
 ## 📂 Documents
-Place your input documents (images or PDFs) inside the `Documents/` folder.
+Upload your file (PDF or image) using the app. It will be saved in the `Documents` directory automatically.
 
 ## 🧠 Prompt Example
 > What are all the different ways I can apply for the minority quota and what are the certificates needed?
 
 ## 📝 License
-MIT
