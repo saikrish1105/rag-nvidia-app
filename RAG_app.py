@@ -14,12 +14,13 @@ from dotenv import load_dotenv
 from io import BytesIO
 from PIL import Image
 import img2pdf
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 load_dotenv()
 
 nim_api_key = os.getenv("NVIDIA_API_KEY") 
 
-# convert input files to pdf for loader to work
 def convert_to_pdf(img_path):
     if img_path.lower().endswith('.pdf'):
         return img_path
@@ -36,7 +37,6 @@ def convert_to_pdf(img_path):
     image.close()
     return pdf_path 
 
-# load your documents and create multiple smaller chunks of data
 def load_chunk_documents(file_path):
     pdf_path = convert_to_pdf(file_path)
     loader = PyMuPDF4LLMLoader(
@@ -44,55 +44,66 @@ def load_chunk_documents(file_path):
         extract_images=True,
         images_parser=RapidOCRBlobParser(),
     )
-    documents = list(loader.lazy_load()) # 
+    documents = list(loader.lazy_load())  
+    
     char_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200
     )
 
     result = char_splitter.split_documents(documents)
-
     return result
 
-# convert all these chunks to embeddings and storing it in a Vector Database
-def VectorDB(docs):
+def VectorDB(docs, file_path):
     embeddings = NVIDIAEmbeddings(
-        model="NV-Embed-QA",  # Choose from table above
-        nvidia_api_key= nim_api_key
+        model="NV-Embed-QA",
+        nvidia_api_key=nim_api_key
     )
+    # Unique collection name based on file name
+    doc_name = os.path.splitext(os.path.basename(file_path))[0]
+    collection_name = f"nvidia_{doc_name}"
 
     vector_store = Chroma.from_documents(
         documents=docs,
-        embedding = embeddings,
-        persist_directory='chroma_db3',
-        collection_name='nvidia_embeddings'
+        embedding=embeddings,
+        persist_directory='chroma_db3',  # SAME DB folder
+        collection_name=collection_name  # UNIQUE per document
     )
-    return vector_store
+    return vector_store, collection_name
 
-# create a MongoDB logger class to store your query answer and context
+# new function to properly load vector store for a specific document
+def load_vector_store_for_doc(file_path):
+    doc_name = os.path.splitext(os.path.basename(file_path))[0]
+    collection_name = f"nvidia_{doc_name}"
+    
+    embeddings = NVIDIAEmbeddings(
+        model="NV-Embed-QA",
+        nvidia_api_key=nim_api_key
+    )
+    
+    return Chroma(
+        persist_directory='chroma_db3',
+        collection_name=collection_name,
+        embedding_function=embeddings
+    )
+
 class MongoLogger:
     def __init__(self):
-        # self.client = MongoClient(
-        #     "mongodb://admin:password@localhost:27017/",  # Added credentials
-        #     authSource="admin",  # Specify auth database
-        #     authMechanism="SCRAM-SHA-256",  # Explicit authentication method
-        #     serverSelectionTimeoutMS=5000
-        # )
         self.client = MongoClient("mongodb://localhost:27017/") 
         try:
-            # Verify connection works
             self.client.admin.command('ping')
-            print("Successfully connected to MongoDB")
+            print("✅ Successfully connected to MongoDB")
         except Exception as e:
-            print("MongoDB connection failed:", e)
+            print("❌ MongoDB connection failed:", e)
             raise
         
         self.db = self.client["rag_logs"]
         self.queries = self.db["queries"]
         
-    def log(self, query, context, answer):
+    def log(self, query, context, answer, doc_name):
         record = {
             "timestamp": datetime.utcnow(),
+            "document": doc_name,
             "query": query,
             "context": context,
             "answer": answer,
@@ -101,64 +112,80 @@ class MongoLogger:
         self.queries.insert_one(record)
         return record
 
-# format the retrive documents together to send as context to LLM
 def format_docs(retrieved_docs):
-  context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
-  return context_text
+    return "\n\n".join(doc.page_content for doc in retrieved_docs)
 
-# Enter the path to your file
-documents_loaded = load_chunk_documents(r"Documents\1-Definition and Macroeconomic Issues-16-07-2024.pdf")
 
-#creating a vector and storing it in a Vector Database
-vector_store = VectorDB(documents_loaded)
-
-#Open MongoDB logger for storing all data
-logger = MongoLogger()
-
-# Retrieve the context close to your query
-retriever = vector_store.as_retriever(
+# Complete RAG Pipeline
+def query_document(file_path, question):
+    # Load the vector store for that document
+    vector_store = load_vector_store_for_doc(file_path)
+    
+    retriever = vector_store.as_retriever(
         search_type='mmr',
-        search_kwargs=({"k":5,"lambda_mult":0.5}) #lambda_mult is relevance-div balance
+        search_kwargs={"k": 5, "lambda_mult": 0.5}
     )
 
-#name of the model you're using
-llm = ChatNVIDIA(
-    model = "mistralai/mixtral-8x7b-instruct-v0.1",
-    temperature = 1.3,
-    api_key=nim_api_key
-)
+    llm = ChatNVIDIA(
+        model="mistralai/mixtral-8x7b-instruct-v0.1",
+        temperature=1.3,
+        api_key=nim_api_key
+    )
 
-#predefine prompt - change it to your need
-prompt = PromptTemplate(
-    template="""
-    You are a helpful assistant.
-    Answer ONLY from the provided transcript context.
-    If the context is insufficient, just say you don't know.
-    Context : 
-    {context}
-    Question: 
-    {question}
-    """,
-    input_variables = ['context', 'question']
-)
+    prompt = PromptTemplate(
+        template="""
+        You are a helpful assistant.
+        Answer ONLY from the provided transcript context.
+        If the context is insufficient, just say you don't know.
 
-# Parallel chainning the entire RAG model
-parallel_chain = RunnableParallel({
-    'context' : retriever | RunnableLambda(format_docs),
-    'question' : RunnablePassthrough()
-}) 
-parser = StrOutputParser()
-final_chain = parallel_chain | prompt | llm | parser
+        Context:
+        {context}
 
-# enter your query 
-question = "Explain me the core idea in 1 line"
-answer = final_chain.invoke(question)
-context = format_docs(retriever.invoke(question))
+        Using this context,answer the question appropriately.
 
-#Log the query answer and context to MongoDB
-logger.log(question,context,answer)
+        Question:
+        {question}
+        """,
+        input_variables=['context', 'question']
+    )
 
-print(f"Question: {question}")
-print(f"Answer: {answer}")
-print(f"\nRetrieved Context:\n{context[:200]}...")
+    # Parallel pipeline
+    parallel_chain = RunnableParallel({
+        'context': retriever | RunnableLambda(format_docs),
+        'question': RunnablePassthrough()
+    })
 
+    parser = StrOutputParser()
+    final_chain = parallel_chain | prompt | llm | parser
+
+
+    answer = final_chain.invoke(question)
+    context = format_docs(retriever.invoke(question))
+    
+    # Log to MongoDB
+    doc_name = os.path.basename(file_path)
+    logger.log(question, context, answer, doc_name)
+
+    print(f"\n📄 Document: {doc_name}")
+    print(f"❓ Question: {question}")
+    print(f"\nRetrieved Context (first 200 chars):\n{context[:200]}...")
+    print(f"✅ Answer: {answer}")
+
+    return answer
+
+
+if __name__ == "__main__":
+
+    file_path = input("Enter file relative path: ")
+    # file_path = r"Documents\licnse3.pdf"
+
+    documents_loaded = load_chunk_documents(file_path)
+
+    vector_store, collection_name = VectorDB(documents_loaded, file_path)
+    print(f"✅ Vector DB created for collection: {collection_name}")
+
+    logger = MongoLogger()
+
+    # 4️⃣ Query the document
+    question = input("Enter your question: ")
+    query_document(file_path, question)
