@@ -29,7 +29,7 @@ This project is a Retrieval-Augmented Generation (RAG) application using:
 
 3. **Start MongoDB (Docker example)**:
     ```bash
-    docker run -d --name rag-mongo -p 27017:27017 mongo
+    docker run -d --name rag-mongo -p 27018:27017 mongo
     ```
 
 4. **Run the app**:
